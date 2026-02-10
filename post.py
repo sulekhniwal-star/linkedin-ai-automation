@@ -3,6 +3,7 @@ import requests
 import json
 import hashlib
 import re
+import time
 from groq import Groq
 
 # ==============================
@@ -16,19 +17,25 @@ if not all([GROQ_API_KEY, LINKEDIN_TOKEN, AUTHOR_URN]):
     raise EnvironmentError("Missing required environment variables")
 
 # ==============================
-# GROQ CLIENT
+# CLIENTS
 # ==============================
 client = Groq(api_key=GROQ_API_KEY)
 
+headers = {
+    "Authorization": f"Bearer {LINKEDIN_TOKEN}",
+    "Content-Type": "application/json",
+    "X-Restli-Protocol-Version": "2.0.0"
+}
+
 # ==============================
-# DUPLICATE PREVENTION SETUP
+# DUPLICATE PREVENTION
 # ==============================
 HISTORY_FILE = "posted_hashes.json"
 
 def normalize(text: str) -> str:
     text = text.lower()
-    text = re.sub(r"#\w+", "", text)     # remove hashtags
-    text = re.sub(r"\W+", " ", text)     # remove punctuation/symbols
+    text = re.sub(r"#\w+", "", text)
+    text = re.sub(r"\W+", " ", text)
     return text.strip()
 
 def hash_text(text: str) -> str:
@@ -48,15 +55,19 @@ def save_hash(new_hash: str):
         json.dump(list(hashes), f, indent=2)
 
 # ==============================
-# PROMPT
+# ENGAGEMENT OPTIMIZED PROMPT
 # ==============================
 PROMPT = """
-Create a professional LinkedIn post about AI or Computer Science.
-Max 120 words.
-Professional, engaging, and insightful.
-Include 2–3 relevant hashtags.
-Rotate topics like AI, ML, DSA, Cybersecurity, Cloud.
-No emojis.
+Write a high-engagement LinkedIn post about AI or Computer Science.
+
+Rules:
+- Max 120 words
+- Strong hook in first 2 lines (question, stat, or bold claim)
+- 1 actionable insight
+- End with a soft CTA (question or opinion)
+- Professional tone, no emojis
+- 2–3 relevant hashtags
+- Topics rotate: AI, ML, DSA, Cybersecurity, Cloud, Careers
 """
 
 # ==============================
@@ -64,33 +75,74 @@ No emojis.
 # ==============================
 existing_hashes = load_hashes()
 
-for attempt in range(5):
+for _ in range(5):
     response = client.chat.completions.create(
         model="llama3-70b-8192",
         messages=[{"role": "user", "content": PROMPT}]
     )
 
     post_text = response.choices[0].message.content.strip()
-
-    normalized = normalize(post_text)
-    post_hash = hash_text(normalized)
+    post_hash = hash_text(normalize(post_text))
 
     if post_hash not in existing_hashes:
         save_hash(post_hash)
         break
 else:
-    raise RuntimeError("Could not generate a unique post after 5 attempts")
+    raise RuntimeError("Failed to generate unique post")
 
 # ==============================
-# POST TO LINKEDIN
+# IMAGE UPLOAD
 # ==============================
-url = "https://api.linkedin.com/v2/ugcPosts"
+def upload_image(image_path):
+    register_url = "https://api.linkedin.com/v2/assets?action=registerUpload"
 
-headers = {
-    "Authorization": f"Bearer {LINKEDIN_TOKEN}",
-    "Content-Type": "application/json",
-    "X-Restli-Protocol-Version": "2.0.0"
-}
+    payload = {
+        "registerUploadRequest": {
+            "owner": AUTHOR_URN,
+            "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
+            "serviceRelationships": [{
+                "relationshipType": "OWNER",
+                "identifier": "urn:li:userGeneratedContent"
+            }]
+        }
+    }
+
+    r = requests.post(register_url, headers=headers, json=payload)
+    r.raise_for_status()
+    data = r.json()
+
+    upload_url = data["value"]["uploadMechanism"][
+        "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"
+    ]["uploadUrl"]
+
+    asset_urn = data["value"]["asset"]
+
+    with open(image_path, "rb") as img:
+        requests.put(upload_url, data=img, headers={
+            "Authorization": f"Bearer {LINKEDIN_TOKEN}",
+            "Content-Type": "application/octet-stream"
+        })
+
+    return asset_urn
+
+# ==============================
+# AUTO-RETRY POST FUNCTION
+# ==============================
+def post_with_retry(url, payload, retries=3):
+    for attempt in range(1, retries + 1):
+        r = requests.post(url, headers=headers, json=payload)
+        if r.status_code in (200, 201):
+            return r
+        print(f"Retry {attempt}/{retries} failed → {r.status_code}")
+        time.sleep(2 ** attempt)
+    raise RuntimeError("LinkedIn API failed after retries")
+
+# ==============================
+# CREATE POST (IMAGE + TEXT)
+# ==============================
+image_urn = upload_image("post_image.png")  # make sure file exists
+
+post_url = "https://api.linkedin.com/v2/ugcPosts"
 
 payload = {
     "author": AUTHOR_URN,
@@ -98,7 +150,12 @@ payload = {
     "specificContent": {
         "com.linkedin.ugc.ShareContent": {
             "shareCommentary": {"text": post_text},
-            "shareMediaCategory": "NONE"
+            "shareMediaCategory": "IMAGE",
+            "media": [{
+                "status": "READY",
+                "media": image_urn,
+                "title": {"text": "AI Insights"}
+            }]
         }
     },
     "visibility": {
@@ -106,8 +163,7 @@ payload = {
     }
 }
 
-response = requests.post(url, headers=headers, json=payload)
+response = post_with_retry(post_url, payload)
 
-print("LinkedIn Status Code:", response.status_code)
-print("Response:", response.text)
-print("\nPosted Content:\n", post_text)
+print("Posted successfully ✅")
+print(post_text)
