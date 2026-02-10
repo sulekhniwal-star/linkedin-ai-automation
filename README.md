@@ -26,9 +26,13 @@ Built for **developers, creators, and professionals** who want consistent person
 
 ![alt text](image.png)
 
+---
+
 ## 📁 Project Structure
 
 ![](image-1.png)
+
+---
 
 ## ⚙️ Environment Variables
 
@@ -39,12 +43,16 @@ LINKEDIN_PERSON_URN=urn:li:person:xxxxxxxx
 
 ⚠️ Keep these values in GitHub Secrets. Never commit them.
 
-🛠️ Installation (Local)
+---
+
+## 🛠️ Installation (Local)
 
 git clone https://github.com/yourusername/linkedin-ai-automation.git
 cd linkedin-ai-automation
 pip install -r requirements.txt
 python post.py
+
+---
 
 ⏰ Automation
 
@@ -53,6 +61,8 @@ daily_post.yml → Posts daily AI/CS content
 reply_comments.yml → Replies to comments intelligently
 
 Runs completely unattended once configured.
+
+---
 
 🔒 Safety & Ethics
 
@@ -64,6 +74,8 @@ Toxic comment filtering
 
 Professional tone enforcement
 
+---
+
 🚀 Future Enhancements
 
 Analytics dashboard
@@ -73,6 +85,8 @@ Carousel posts
 Multi-account support
 
 Approval-based posting mode
+
+---
 
 👤 Author
 
