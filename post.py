@@ -1,34 +1,99 @@
-import openai, requests, os
+import os
+import requests
+import json
+import hashlib
+import re
+from groq import Groq
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
-token = os.getenv("LINKEDIN_ACCESS_TOKEN")
-author = os.getenv("LINKEDIN_PERSON_URN")
+# ==============================
+# ENVIRONMENT VARIABLES
+# ==============================
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+LINKEDIN_TOKEN = os.getenv("LINKEDIN_ACCESS_TOKEN")
+AUTHOR_URN = os.getenv("LINKEDIN_PERSON_URN")
 
-prompt = """
+if not all([GROQ_API_KEY, LINKEDIN_TOKEN, AUTHOR_URN]):
+    raise EnvironmentError("Missing required environment variables")
+
+# ==============================
+# GROQ CLIENT
+# ==============================
+client = Groq(api_key=GROQ_API_KEY)
+
+# ==============================
+# DUPLICATE PREVENTION SETUP
+# ==============================
+HISTORY_FILE = "posted_hashes.json"
+
+def normalize(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"#\w+", "", text)     # remove hashtags
+    text = re.sub(r"\W+", " ", text)     # remove punctuation/symbols
+    return text.strip()
+
+def hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+def load_hashes():
+    try:
+        with open(HISTORY_FILE, "r") as f:
+            return set(json.load(f))
+    except FileNotFoundError:
+        return set()
+
+def save_hash(new_hash: str):
+    hashes = load_hashes()
+    hashes.add(new_hash)
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(list(hashes), f, indent=2)
+
+# ==============================
+# PROMPT
+# ==============================
+PROMPT = """
 Create a professional LinkedIn post about AI or Computer Science.
 Max 120 words.
-Professional, engaging.
-Include 2-3 hashtags.
+Professional, engaging, and insightful.
+Include 2–3 relevant hashtags.
 Rotate topics like AI, ML, DSA, Cybersecurity, Cloud.
+No emojis.
 """
 
-response = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo",
-    messages=[{"role": "user", "content": prompt}]
-)
+# ==============================
+# GENERATE UNIQUE POST
+# ==============================
+existing_hashes = load_hashes()
 
-post_text = response.choices[0].message.content
+for attempt in range(5):
+    response = client.chat.completions.create(
+        model="llama3-70b-8192",
+        messages=[{"role": "user", "content": PROMPT}]
+    )
 
+    post_text = response.choices[0].message.content.strip()
+
+    normalized = normalize(post_text)
+    post_hash = hash_text(normalized)
+
+    if post_hash not in existing_hashes:
+        save_hash(post_hash)
+        break
+else:
+    raise RuntimeError("Could not generate a unique post after 5 attempts")
+
+# ==============================
+# POST TO LINKEDIN
+# ==============================
 url = "https://api.linkedin.com/v2/ugcPosts"
 
 headers = {
-    "Authorization": f"Bearer {token}",
+    "Authorization": f"Bearer {LINKEDIN_TOKEN}",
     "Content-Type": "application/json",
     "X-Restli-Protocol-Version": "2.0.0"
 }
 
-data = {
-    "author": author,
+payload = {
+    "author": AUTHOR_URN,
     "lifecycleState": "PUBLISHED",
     "specificContent": {
         "com.linkedin.ugc.ShareContent": {
@@ -41,4 +106,8 @@ data = {
     }
 }
 
-requests.post(url, headers=headers, json=data)
+response = requests.post(url, headers=headers, json=payload)
+
+print("LinkedIn Status Code:", response.status_code)
+print("Response:", response.text)
+print("\nPosted Content:\n", post_text)

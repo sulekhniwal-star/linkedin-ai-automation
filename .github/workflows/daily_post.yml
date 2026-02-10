@@ -1,17 +1,42 @@
-name: Daily LinkedIn Post
+name: Daily LinkedIn AI Post
 
 on:
   schedule:
-    - cron: "30 6 * * *"   # 12:00 PM IST
+    # Runs every day at 12:00 PM IST (06:30 UTC)
+    - cron: "30 6 * * *"
   workflow_dispatch:
 
 jobs:
   post:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      - run: pip install -r requirements.txt
-      - run: python post.py
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run LinkedIn post bot
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
+        run: |
+          python post.py
+
+      # 🔐 THIS STEP IS CRITICAL (memory persistence)
+      - name: Commit post history
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add posted_hashes.json
+          git commit -m "Update LinkedIn post history" || echo "No changes to commit"
+          git push

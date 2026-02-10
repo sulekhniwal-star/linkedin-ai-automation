@@ -1,14 +1,15 @@
-import openai, requests, os
+import requests, os
+from groq import Groq
 from datetime import datetime, timedelta
 from dateutil import parser
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
 token = os.getenv("LINKEDIN_ACCESS_TOKEN")
 author = os.getenv("LINKEDIN_PERSON_URN")
 
 headers = {"Authorization": f"Bearer {token}"}
 
-# Fetch recent posts
 posts = requests.get(
     f"https://api.linkedin.com/v2/shares?q=owners&owners={author}",
     headers=headers
@@ -29,13 +30,15 @@ for post in posts.get("elements", []):
 
         comment_text = c["message"]["text"]
 
-        ai_reply = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+        response = client.chat.completions.create(
+            model="llama3-8b-8192",
             messages=[{
                 "role": "user",
                 "content": f"Reply professionally to this LinkedIn comment:\n{comment_text}"
             }]
-        ).choices[0].message.content
+        )
+
+        ai_reply = response.choices[0].message.content
 
         reply_url = f"https://api.linkedin.com/v2/socialActions/{c['id']}/comments"
         requests.post(reply_url, headers=headers, json={
